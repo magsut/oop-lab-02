@@ -1,10 +1,14 @@
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Array;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 import java.util.StringJoiner;
 import java.util.stream.Collectors;
 
@@ -53,7 +57,7 @@ public final class WarehouseDemo {
             if (count == 0) {
                 continue;
             }
-            Object[] arguments = resolveArguments(method, values, results);
+            Object[] arguments = resolveArguments(method, values, new HashSet<>());
             method.setAccessible(true);
 
             for (int attempt = 0; attempt < count; attempt++) {
@@ -64,36 +68,39 @@ public final class WarehouseDemo {
         return results.toString();
     }
 
-    private static Object[] resolveArguments(Method method, Object[] values, StringJoiner results)
+    private static Object[] resolveArguments(Executable executable, Object[] values, Set<Class<?>> constructing)
             throws ReflectiveOperationException {
-        Class<?>[] types = method.getParameterTypes();
+        Class<?>[] types = executable.getParameterTypes();
         Object[] arguments = new Object[types.length];
         for (int index = 0; index < types.length; index++) {
             Class<?> type = types[index];
-            Class<?> valueType = MethodType.methodType(type).wrap().returnType();
-            for (Object value : values) {
-                if (valueType.isInstance(value)) {
-                    arguments[index] = value;
-                    break;
-                }
-            }
+            arguments[index] = findArgument(type, values);
             if (arguments[index] == null) {
                 try {
-                    arguments[index] = createArgument(type);
+                    arguments[index] = createArgument(type, values, constructing);
                 } catch (ReflectiveOperationException exception) {
+                    String kind = executable instanceof Method ? "метода" : "конструктора";
                     throw new ReflectiveOperationException(
-                            "Не удалось создать аргумент типа %s для метода %s"
-                                    .formatted(type.getTypeName(), method.getName()), exception);
+                            "Не удалось создать аргумент типа %s для %s %s"
+                                    .formatted(type.getTypeName(), kind, executable.getName()), exception);
                 }
-                results.add(("Аргумент типа %s для метода %s не найден среди переданных значений. "
-                        + "Будет использовано значение по умолчанию.")
-                        .formatted(type.getTypeName(), method.getName()));
             }
         }
         return arguments;
     }
 
-    private static Object createArgument(Class<?> type) throws ReflectiveOperationException {
+    private static Object findArgument(Class<?> type, Object[] values) {
+        Class<?> valueType = MethodType.methodType(type).wrap().returnType();
+        for (Object value : values) {
+            if (valueType.isInstance(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static Object createArgument(Class<?> type, Object[] values, Set<Class<?>> constructing)
+            throws ReflectiveOperationException {
         Class<?> primitiveType = MethodType.methodType(type).unwrap().returnType();
         if (primitiveType.isPrimitive() && primitiveType != void.class) {
             return Array.get(Array.newInstance(primitiveType, 1), 0);
@@ -101,6 +108,29 @@ public final class WarehouseDemo {
         if (type.isArray()) {
             return Array.newInstance(type.getComponentType(), 0);
         }
-        return type.getDeclaredConstructor().newInstance();
+
+        if (!constructing.add(type)) {
+            throw new ReflectiveOperationException("Циклическая зависимость конструкторов для " + type.getTypeName());
+        }
+        try {
+            Constructor<?>[] constructors = type.getDeclaredConstructors();
+            Arrays.sort(constructors, Comparator.<Constructor<?>>comparingInt(Constructor::getParameterCount)
+                    .thenComparing(Constructor::toString));
+            ReflectiveOperationException lastFailure = null;
+            for (Constructor<?> constructor : constructors) {
+                if (!constructor.canAccess(null)) {
+                    continue;
+                }
+                try {
+                    Object[] arguments = resolveArguments(constructor, values, constructing);
+                    return constructor.newInstance(arguments);
+                } catch (ReflectiveOperationException exception) {
+                    lastFailure = exception;
+                }
+            }
+            throw new ReflectiveOperationException("Нет подходящего конструктора для " + type.getTypeName(), lastFailure);
+        } finally {
+            constructing.remove(type);
+        }
     }
 }

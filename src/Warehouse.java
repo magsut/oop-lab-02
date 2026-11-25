@@ -29,6 +29,8 @@ public final class Warehouse {
         }
     }
 
+    public record Packaging(int weightGrams) {}
+
     public void addStock(Product product, int quantity) {
         Objects.requireNonNull(product, "Укажите товар");
         requirePositiveQuantity(quantity);
@@ -71,7 +73,8 @@ public final class Warehouse {
     }
 
     @Repeat(1)
-    private String calculateShipmentWeight(Shipment shipment, int packagingWeightGrams) {
+    private String calculateShipmentWeight(Shipment shipment, Packaging packaging) {
+        int packagingWeightGrams = packaging.weightGrams();
         BigDecimal kilograms = BigDecimal.valueOf(packagingWeightGrams, 3);
         for (var line : shipment.quantities().entrySet()) {
             BigDecimal weightPerUnit = BigDecimal.valueOf(line.getKey().weightPerUnitKg());
