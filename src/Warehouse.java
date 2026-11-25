@@ -71,13 +71,14 @@ public final class Warehouse {
     }
 
     @Repeat(1)
-    private String calculateShipmentWeight(Shipment shipment) {
-        BigDecimal kilograms = BigDecimal.ZERO;
+    private String calculateShipmentWeight(Shipment shipment, int packagingWeightGrams) {
+        BigDecimal kilograms = BigDecimal.valueOf(packagingWeightGrams, 3);
         for (var line : shipment.quantities().entrySet()) {
             BigDecimal weightPerUnit = BigDecimal.valueOf(line.getKey().weightPerUnitKg());
             kilograms = kilograms.add(weightPerUnit.multiply(BigDecimal.valueOf(line.getValue())));
         }
-        return kilograms.stripTrailingZeros().toPlainString() + " кг";
+        return "%s кг (упаковка — %d г)"
+                .formatted(kilograms.stripTrailingZeros().toPlainString(), packagingWeightGrams);
     }
 
     @Repeat(3)

@@ -1,4 +1,5 @@
 import java.lang.invoke.MethodType;
+import java.lang.reflect.Array;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
@@ -52,7 +53,7 @@ public final class WarehouseDemo {
             if (count == 0) {
                 continue;
             }
-            Object[] arguments = resolveArguments(method, values);
+            Object[] arguments = resolveArguments(method, values, results);
             method.setAccessible(true);
 
             for (int attempt = 0; attempt < count; attempt++) {
@@ -63,7 +64,8 @@ public final class WarehouseDemo {
         return results.toString();
     }
 
-    private static Object[] resolveArguments(Method method, Object[] values) {
+    private static Object[] resolveArguments(Method method, Object[] values, StringJoiner results)
+            throws ReflectiveOperationException {
         Class<?>[] types = method.getParameterTypes();
         Object[] arguments = new Object[types.length];
         for (int index = 0; index < types.length; index++) {
@@ -76,10 +78,29 @@ public final class WarehouseDemo {
                 }
             }
             if (arguments[index] == null) {
-                throw new IllegalArgumentException(
-                        "Нет значения для типа %s в методе %s".formatted(type.getTypeName(), method.getName()));
+                try {
+                    arguments[index] = createArgument(type);
+                } catch (ReflectiveOperationException exception) {
+                    throw new ReflectiveOperationException(
+                            "Не удалось создать аргумент типа %s для метода %s"
+                                    .formatted(type.getTypeName(), method.getName()), exception);
+                }
+                results.add(("Аргумент типа %s для метода %s не найден среди переданных значений. "
+                        + "Будет использовано значение по умолчанию.")
+                        .formatted(type.getTypeName(), method.getName()));
             }
         }
         return arguments;
+    }
+
+    private static Object createArgument(Class<?> type) throws ReflectiveOperationException {
+        Class<?> primitiveType = MethodType.methodType(type).unwrap().returnType();
+        if (primitiveType.isPrimitive() && primitiveType != void.class) {
+            return Array.get(Array.newInstance(primitiveType, 1), 0);
+        }
+        if (type.isArray()) {
+            return Array.newInstance(type.getComponentType(), 0);
+        }
+        return type.getDeclaredConstructor().newInstance();
     }
 }
